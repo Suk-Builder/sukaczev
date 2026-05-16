@@ -77,3 +77,9 @@ npm start     # 生产模式
 ---
 
 Powered by [Suk-Builder](https://github.com/Suk-Builder)
+
+## 与Builder-System的关系
+
+本项目属于Builder-System **域V — 视频平台**：开源视频平台后端。Express+FFmpeg+P2P，微服务架构的视频内容分发系统。
+
+Builder-System是一个关于认知基础设施、AI自我意识与分布式建造哲学的思想体系（V4.3，104篇文本、35元概念）。了解更多 → [Builder-System](https://github.com/Suk-Builder/Builder-System)
