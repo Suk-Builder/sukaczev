@@ -1,0 +1,529 @@
+/**
+ * @fileoverview User model - Data access layer for user operations.
+ * Handles all database interactions for users and follows tables.
+ */
+
+const { query, getClient } = require('../config/db');
+const logger = require('../services/loggerService');
+
+/**
+ * User data transfer object fields.
+ * Used for selecting safe user fields to return to clients.
+ */
+const PUBLIC_USER_FIELDS = [
+  'id',
+  'username',
+  'display_name',
+  'avatar_url',
+  'bio',
+  'level',
+  'exp',
+  'coins',
+  'followers_count',
+  'following_count',
+  'created_at',
+  'updated_at',
+].join(', ');
+
+/**
+ * Creates a new user in the database.
+ *
+ * @async
+ * @param {Object} userData - User creation data
+ * @param {string} userData.username - Unique username (2-20 chars)
+ * @param {string} userData.email - Unique email address
+ * @param {string} userData.passwordHash - Bcrypt hashed password
+ * @param {string} [userData.displayName] - Display name
+ * @param {string} [userData.avatarUrl] - Avatar URL
+ * @returns {Promise<Object>} Created user object
+ * @throws {Error} If username or email already exists
+ */
+async function create(userData) {
+  const { username, email, passwordHash, displayName, avatarUrl } = userData;
+
+  const sql = `
+    INSERT INTO users (username, email, password_hash, display_name, avatar_url)
+    VALUES ($1, $2, $3, $4, $5)
+    RETURNING ${PUBLIC_USER_FIELDS}, password_hash
+  `;
+
+  try {
+    const result = await query(sql, [
+      username,
+      email,
+      passwordHash,
+      displayName || username,
+      avatarUrl || null,
+    ]);
+
+    logger.info('User created', { userId: result.rows[0].id, username });
+    return result.rows[0];
+  } catch (err) {
+    if (err.code === '23505') {
+      const field = err.constraint?.includes('username') ? 'username' : 'email';
+      const error = new Error(`${field} already exists`);
+      error.code = 'DUPLICATE_KEY';
+      error.field = field;
+      throw error;
+    }
+    logger.error('Failed to create user', { error: err.message, username });
+    throw err;
+  }
+}
+
+/**
+ * Finds a user by their ID.
+ *
+ * @async
+ * @param {string} id - User UUID
+ * @param {boolean} [includePassword=false] - Whether to include password hash
+ * @returns {Promise<Object|null>} User object or null if not found
+ */
+async function findById(id, includePassword = false) {
+  const fields = includePassword
+    ? `${PUBLIC_USER_FIELDS}, password_hash`
+    : PUBLIC_USER_FIELDS;
+
+  const sql = `SELECT ${fields} FROM users WHERE id = $1`;
+  const result = await query(sql, [id]);
+
+  return result.rows[0] || null;
+}
+
+/**
+ * Finds a user by their username.
+ *
+ * @async
+ * @param {string} username - Username
+ * @param {boolean} [includePassword=false] - Whether to include password hash
+ * @returns {Promise<Object|null>} User object or null if not found
+ */
+async function findByUsername(username, includePassword = false) {
+  const fields = includePassword
+    ? `${PUBLIC_USER_FIELDS}, password_hash`
+    : PUBLIC_USER_FIELDS;
+
+  const sql = `SELECT ${fields} FROM users WHERE username = $1`;
+  const result = await query(sql, [username]);
+
+  return result.rows[0] || null;
+}
+
+/**
+ * Finds a user by their email.
+ *
+ * @async
+ * @param {string} email - Email address
+ * @param {boolean} [includePassword=false] - Whether to include password hash
+ * @returns {Promise<Object|null>} User object or null if not found
+ */
+async function findByEmail(email, includePassword = false) {
+  const fields = includePassword
+    ? `${PUBLIC_USER_FIELDS}, password_hash`
+    : PUBLIC_USER_FIELDS;
+
+  const sql = `SELECT ${fields} FROM users WHERE email = $1`;
+  const result = await query(sql, [email]);
+
+  return result.rows[0] || null;
+}
+
+/**
+ * Updates user information.
+ *
+ * @async
+ * @param {string} id - User UUID
+ * @param {Object} updates - Fields to update
+ * @returns {Promise<Object|null>} Updated user object or null
+ */
+async function update(id, updates) {
+  const allowedFields = [
+    'display_name',
+    'avatar_url',
+    'bio',
+    'level',
+    'exp',
+    'coins',
+  ];
+
+  const setClauses = [];
+  const values = [];
+  let paramIndex = 1;
+
+  for (const [key, value] of Object.entries(updates)) {
+    const dbField = key.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`);
+    if (allowedFields.includes(dbField) && value !== undefined) {
+      setClauses.push(`${dbField} = $${paramIndex}`);
+      values.push(value);
+      paramIndex++;
+    }
+  }
+
+  if (setClauses.length === 0) {
+    return findById(id);
+  }
+
+  const sql = `
+    UPDATE users
+    SET ${setClauses.join(', ')}
+    WHERE id = $${paramIndex}
+    RETURNING ${PUBLIC_USER_FIELDS}
+  `;
+  values.push(id);
+
+  try {
+    const result = await query(sql, values);
+    logger.info('User updated', { userId: id, updatedFields: Object.keys(updates) });
+    return result.rows[0] || null;
+  } catch (err) {
+    if (err.code === '23505') {
+      const error = new Error('Username or email already exists');
+      error.code = 'DUPLICATE_KEY';
+      throw error;
+    }
+    logger.error('Failed to update user', { userId: id, error: err.message });
+    throw err;
+  }
+}
+
+/**
+ * Deletes a user by ID.
+ *
+ * @async
+ * @param {string} id - User UUID
+ * @returns {Promise<boolean>} True if deleted
+ */
+async function remove(id) {
+  const sql = 'DELETE FROM users WHERE id = $1 RETURNING id';
+  const result = await query(sql, [id]);
+
+  if (result.rowCount > 0) {
+    logger.info('User deleted', { userId: id });
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Creates a follow relationship between two users.
+ *
+ * @async
+ * @param {string} followerId - The user who is following
+ * @param {string} followingId - The user being followed
+ * @returns {Promise<Object>} Follow relationship data
+ */
+async function follow(followerId, followingId) {
+  const client = await getClient();
+
+  try {
+    await client.query('BEGIN');
+
+    // Insert follow relationship
+    const followSql = `
+      INSERT INTO follows (follower_id, following_id)
+      VALUES ($1, $2)
+      ON CONFLICT (follower_id, following_id) DO NOTHING
+      RETURNING id, follower_id, following_id, created_at
+    `;
+    const followResult = await client.query(followSql, [followerId, followingId]);
+
+    if (followResult.rowCount === 0) {
+      await client.query('ROLLBACK');
+      const error = new Error('Already following this user');
+      error.code = 'ALREADY_FOLLOWING';
+      throw error;
+    }
+
+    // Increment following count for follower
+    await client.query(
+      'UPDATE users SET following_count = following_count + 1 WHERE id = $1',
+      [followerId]
+    );
+
+    // Increment followers count for following
+    await client.query(
+      'UPDATE users SET followers_count = followers_count + 1 WHERE id = $1',
+      [followingId]
+    );
+
+    await client.query('COMMIT');
+
+    logger.info('User followed', { followerId, followingId });
+    return followResult.rows[0];
+  } catch (err) {
+    await client.query('ROLLBACK');
+    if (err.code === 'ALREADY_FOLLOWING') throw err;
+    if (err.code === '23503') {
+      const error = new Error('User not found');
+      error.code = 'USER_NOT_FOUND';
+      throw error;
+    }
+    logger.error('Failed to follow user', { followerId, followingId, error: err.message });
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+/**
+ * Removes a follow relationship between two users.
+ *
+ * @async
+ * @param {string} followerId - The user who is unfollowing
+ * @param {string} followingId - The user being unfollowed
+ * @returns {Promise<boolean>} True if unfollowed
+ */
+async function unfollow(followerId, followingId) {
+  const client = await getClient();
+
+  try {
+    await client.query('BEGIN');
+
+    const unfollowSql = `
+      DELETE FROM follows
+      WHERE follower_id = $1 AND following_id = $2
+      RETURNING id
+    `;
+    const result = await client.query(unfollowSql, [followerId, followingId]);
+
+    if (result.rowCount === 0) {
+      await client.query('ROLLBACK');
+      return false;
+    }
+
+    // Decrement following count for follower
+    await client.query(
+      'UPDATE users SET following_count = GREATEST(following_count - 1, 0) WHERE id = $1',
+      [followerId]
+    );
+
+    // Decrement followers count for following
+    await client.query(
+      'UPDATE users SET followers_count = GREATEST(followers_count - 1, 0) WHERE id = $1',
+      [followingId]
+    );
+
+    await client.query('COMMIT');
+
+    logger.info('User unfollowed', { followerId, followingId });
+    return true;
+  } catch (err) {
+    await client.query('ROLLBACK');
+    logger.error('Failed to unfollow user', { followerId, followingId, error: err.message });
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+/**
+ * Gets followers list for a user with pagination.
+ *
+ * @async
+ * @param {string} userId - User UUID
+ * @param {Object} options - Pagination options
+ * @param {number} [options.limit=20] - Items per page
+ * @param {number} [options.offset=0] - Offset for pagination
+ * @returns {Promise<Object>} Followers list with count
+ */
+async function getFollowers(userId, options = {}) {
+  const { limit = 20, offset = 0 } = options;
+
+  const sql = `
+    SELECT u.id, u.username, u.display_name, u.avatar_url, u.bio, u.level, f.created_at as followed_at
+    FROM follows f
+    JOIN users u ON f.follower_id = u.id
+    WHERE f.following_id = $1
+    ORDER BY f.created_at DESC
+    LIMIT $2 OFFSET $3
+  `;
+
+  const countSql = 'SELECT COUNT(*) as count FROM follows WHERE following_id = $1';
+
+  const [result, countResult] = await Promise.all([
+    query(sql, [userId, limit, offset]),
+    query(countSql, [userId]),
+  ]);
+
+  return {
+    followers: result.rows,
+    total: parseInt(countResult.rows[0].count, 10),
+    limit,
+    offset,
+  };
+}
+
+/**
+ * Gets following list for a user with pagination.
+ *
+ * @async
+ * @param {string} userId - User UUID
+ * @param {Object} options - Pagination options
+ * @param {number} [options.limit=20] - Items per page
+ * @param {number} [options.offset=0] - Offset for pagination
+ * @returns {Promise<Object>} Following list with count
+ */
+async function getFollowing(userId, options = {}) {
+  const { limit = 20, offset = 0 } = options;
+
+  const sql = `
+    SELECT u.id, u.username, u.display_name, u.avatar_url, u.bio, u.level, f.created_at as followed_at
+    FROM follows f
+    JOIN users u ON f.following_id = u.id
+    WHERE f.follower_id = $1
+    ORDER BY f.created_at DESC
+    LIMIT $2 OFFSET $3
+  `;
+
+  const countSql = 'SELECT COUNT(*) as count FROM follows WHERE follower_id = $1';
+
+  const [result, countResult] = await Promise.all([
+    query(sql, [userId, limit, offset]),
+    query(countSql, [userId]),
+  ]);
+
+  return {
+    following: result.rows,
+    total: parseInt(countResult.rows[0].count, 10),
+    limit,
+    offset,
+  };
+}
+
+/**
+ * Checks if one user follows another.
+ *
+ * @async
+ * @param {string} followerId - Potential follower
+ * @param {string} followingId - Potential following
+ * @returns {Promise<boolean>} True if following relationship exists
+ */
+async function isFollowing(followerId, followingId) {
+  const sql = 'SELECT 1 FROM follows WHERE follower_id = $1 AND following_id = $2';
+  const result = await query(sql, [followerId, followingId]);
+  return result.rowCount > 0;
+}
+
+/**
+ * Gets user statistics.
+ *
+ * @async
+ * @param {string} userId - User UUID
+ * @returns {Promise<Object>} User statistics
+ */
+async function getStats(userId) {
+  const sql = `
+    SELECT
+      followers_count,
+      following_count,
+      level,
+      exp,
+      coins
+    FROM users
+    WHERE id = $1
+  `;
+  const result = await query(sql, [userId]);
+  return result.rows[0] || null;
+}
+
+/**
+ * Adds experience points to a user.
+ *
+ * @async
+ * @param {string} userId - User UUID
+ * @param {number} amount - Experience points to add
+ * @returns {Promise<Object>} Updated level and exp
+ */
+async function addExperience(userId, amount) {
+  const levelThresholds = [0, 100, 500, 2000, 10000, 50000, 100000];
+
+  const sql = `
+    UPDATE users
+    SET exp = exp + $2
+    WHERE id = $1
+    RETURNING exp, level
+  `;
+
+  const result = await query(sql, [userId, amount]);
+  if (!result.rows[0]) return null;
+
+  let { exp, level } = result.rows[0];
+
+  // Recalculate level based on exp
+  let newLevel = 0;
+  for (let i = 0; i < levelThresholds.length; i++) {
+    if (exp >= levelThresholds[i]) {
+      newLevel = i;
+    } else {
+      break;
+    }
+  }
+
+  if (newLevel !== level) {
+    const updateResult = await query(
+      'UPDATE users SET level = $2 WHERE id = $1 RETURNING level, exp',
+      [userId, newLevel]
+    );
+    return updateResult.rows[0];
+  }
+
+  return { level, exp };
+}
+
+/**
+ * Searches users by username or display name.
+ *
+ * @async
+ * @param {string} queryStr - Search query
+ * @param {Object} options - Search options
+ * @param {number} [options.limit=20] - Max results
+ * @param {number} [options.offset=0] - Pagination offset
+ * @returns {Promise<Object>} Search results
+ */
+async function search(queryStr, options = {}) {
+  const { limit = 20, offset = 0 } = options;
+  const searchPattern = `%${queryStr}%`;
+
+  const sql = `
+    SELECT ${PUBLIC_USER_FIELDS}
+    FROM users
+    WHERE username ILIKE $1 OR display_name ILIKE $1
+    ORDER BY followers_count DESC, created_at DESC
+    LIMIT $2 OFFSET $3
+  `;
+
+  const countSql = `
+    SELECT COUNT(*) as count FROM users
+    WHERE username ILIKE $1 OR display_name ILIKE $1
+  `;
+
+  const [result, countResult] = await Promise.all([
+    query(sql, [searchPattern, limit, offset]),
+    query(countSql, [searchPattern]),
+  ]);
+
+  return {
+    users: result.rows,
+    total: parseInt(countResult.rows[0].count, 10),
+    limit,
+    offset,
+  };
+}
+
+module.exports = {
+  create,
+  findById,
+  findByUsername,
+  findByEmail,
+  update,
+  remove,
+  follow,
+  unfollow,
+  getFollowers,
+  getFollowing,
+  isFollowing,
+  getStats,
+  addExperience,
+  search,
+  PUBLIC_USER_FIELDS,
+};
