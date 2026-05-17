@@ -23,7 +23,7 @@ app.use(helmet({
 
 // CORS
 app.use(cors({
-  origin: process.env.CORS_ORIGIN || '*',
+  origin: ['https://sukaczev.top', 'https://www.sukaczev.top', 'http://sukaczev.top'],
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
   credentials: true,

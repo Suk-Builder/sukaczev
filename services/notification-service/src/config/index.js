@@ -16,7 +16,7 @@ const config = {
     name: process.env.DB_NAME || 'sukaczev',
     user: process.env.DB_USER || 'sukaczev',
     password: process.env.DB_PASSWORD,
-    poolSize: parseInt(process.env.DB_POOL_SIZE, 10) || 12,
+    poolSize: parseInt(process.env.DB_POOL_SIZE, 10) || 10,
     ssl: process.env.DB_SSL === 'true',
     dialect: 'postgres',
     logging: process.env.DB_LOGGING === 'true',
@@ -34,7 +34,7 @@ const config = {
     url: process.env.RABBITMQ_URL || 'amqp://localhost:5672',
     exchange: process.env.RABBITMQ_EXCHANGE || 'sukaczev.events',
     reconnectInterval: parseInt(process.env.RABBITMQ_RECONNECT_INTERVAL, 10) || 5000,
-    maxReconnectAttempts: parseInt(process.env.RABBITMQ_MAX_RECONNECT_ATTEMPTS, 10) || 12,
+    maxReconnectAttempts: parseInt(process.env.RABBITMQ_MAX_RECONNECT_ATTEMPTS, 10) || 10,
   },
   jwt: {
     secret: process.env.JWT_SECRET || require('crypto').randomBytes(64).toString('hex'),
@@ -43,11 +43,11 @@ const config = {
   websocket: {
     heartbeatInterval: parseInt(process.env.WS_HEARTBEAT_INTERVAL, 10) || 30000,
     maxConnectionsPerUser: parseInt(process.env.WS_MAX_CONNECTIONS_PER_USER, 10) || 5,
-    messageRateLimit: parseInt(process.env.WS_MESSAGE_RATE_LIMIT, 10) || 120,
+    messageRateLimit: parseInt(process.env.WS_MESSAGE_RATE_LIMIT, 10) || 100,
   },
   notification: {
     pageSize: parseInt(process.env.NOTIFICATION_PAGE_SIZE, 10) || 20,
-    maxPageSize: parseInt(process.env.NOTIFICATION_MAX_PAGE_SIZE, 10) || 120,
+    maxPageSize: parseInt(process.env.NOTIFICATION_MAX_PAGE_SIZE, 10) || 100,
     aggregationWindowMs: parseInt(process.env.NOTIFICATION_AGGREGATION_WINDOW_MS, 10) || 300000,
     unreadCacheTtl: parseInt(process.env.NOTIFICATION_UNREAD_CACHE_TTL, 10) || 300,
     maxUnreadCount: parseInt(process.env.NOTIFICATION_MAX_UNREAD_COUNT, 10) || 999,

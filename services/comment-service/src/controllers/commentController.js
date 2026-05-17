@@ -25,7 +25,7 @@ class CommentController {
 
     res.status(200).json({
       success: true,
-      data: result.comments,
+      data: { comments: result.comments, total: result.meta.total || result.meta.totalTopLevel || result.meta.count || result.comments.length },
       meta: result.meta
     });
   });
@@ -106,7 +106,7 @@ class CommentController {
 
     res.status(200).json({
       success: true,
-      data: result.replies,
+      data: { replies: result.replies, total: result.meta.total || result.meta.totalTopLevel || result.meta.count || result.comments.length },
       meta: result.meta
     });
   });
@@ -155,7 +155,7 @@ class CommentController {
 
     res.status(200).json({
       success: true,
-      data: result.comments,
+      data: { comments: result.comments, total: result.meta.total || result.meta.totalTopLevel || result.meta.count || result.comments.length },
       cached: result.cached || false
     });
   });
@@ -188,7 +188,7 @@ class CommentController {
 
     res.status(200).json({
       success: true,
-      data: comments,
+      data: { comments: comments, total: comments.length },
       meta: { count: comments.length, limit, offset }
     });
   });
@@ -206,7 +206,7 @@ class CommentController {
 
     res.status(200).json({
       success: true,
-      data: comments,
+      data: { comments: comments, total: comments.length },
       meta: { count: comments.length, limit, offset }
     });
   });
@@ -259,7 +259,7 @@ class CommentController {
 
     res.status(200).json({
       success: true,
-      data: comments,
+      data: { comments: comments, total: comments.length },
       meta: { count: comments.length, limit }
     });
   });

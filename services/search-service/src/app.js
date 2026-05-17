@@ -22,7 +22,7 @@ app.use(helmet({
 
 // CORS
 app.use(cors({
-  origin: process.env.CORS_ORIGIN || '*',
+  origin: ['https://sukaczev.top', 'https://www.sukaczev.top', 'http://sukaczev.top'],
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
   credentials: true,
@@ -74,7 +74,8 @@ app.get('/health', async (req, res) => {
     health.status = 'degraded';
   }
 
-  const statusCode = health.status === 'ok' ? 200 : 503;
+  // Only return 503 if critical dependency (Redis) is down; ES is optional
+  const statusCode = health.redis === 'connected' ? 200 : 503;
   res.status(statusCode).json(health);
 });
 

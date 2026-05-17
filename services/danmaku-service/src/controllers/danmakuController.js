@@ -19,8 +19,7 @@ class DanmakuController {
 
     res.status(200).json({
       success: true,
-      data: result.danmakus,
-      meta: result.meta
+      data: { danmakus: result.danmakus, count: result.meta.total || result.danmakus.length }
     });
   });
 

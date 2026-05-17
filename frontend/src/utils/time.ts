@@ -225,3 +225,16 @@ export function getRelativeDateLabel(date: string | Date): string {
   if (isYesterday(date)) return '昨天'
   return getDayOfWeek(date)
 }
+
+/**
+ * Format date with time
+ */
+export function formatDateTime(date: string | Date): string {
+  const d = parseDate(date)
+  const year = d.getFullYear()
+  const month = (d.getMonth() + 1).toString().padStart(2, '0')
+  const day = d.getDate().toString().padStart(2, '0')
+  const hours = d.getHours().toString().padStart(2, '0')
+  const mins = d.getMinutes().toString().padStart(2, '0')
+  return `${year}-${month}-${day} ${hours}:${mins}`
+}

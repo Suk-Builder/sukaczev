@@ -233,3 +233,5 @@ export function generateNickname(): string {
   const suffixes = ['猫咪', '狗狗', '兔子', '熊猫', '狐狸', '狮子', '老虎', '熊', '鸟', '鱼', '玩家', '旅行者', '探索者', '冒险家', '达人']
   return prefixes[Math.floor(Math.random() * prefixes.length)] + suffixes[Math.floor(Math.random() * suffixes.length)] + Math.floor(Math.random() * 1000)
 }
+
+// Re-export formatPublishTime from time utils

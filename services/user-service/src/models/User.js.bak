@@ -517,12 +517,22 @@ async function search(queryStr, options = {}) {
  * @param {Object} options - Query options
  * @param {number} options.limit - Maximum number of users to return
  * @param {number} options.offset - Number of users to skip
+
+/**
+ * Find all users with pagination
+ * @async
+ * @param {Object} options - Query options
+ * @param {number} options.limit - Maximum number of users to return
+ * @param {number} options.offset - Number of users to skip
  * @returns {Promise<Object>} Users list with count
  */
 
+
+n
+module.exports = {
 async function findAll(options = {}) {
   const { limit = 20, offset = 0 } = options;
-  const sql = 'SELECT id, username, display_name, avatar_url as avatar, bio, created_at FROM users LIMIT $1 OFFSET $2';
+  const sql = 'SELECT id, username, nickname, avatar, bio, created_at FROM users LIMIT $1 OFFSET $2';
   const countSql = 'SELECT COUNT(*) FROM users';
 
   const [usersResult, countResult] = await Promise.all([
@@ -538,7 +548,7 @@ async function findAll(options = {}) {
   };
 }
 
-module.exports = {
+
   create,
   findById,
   findByUsername,

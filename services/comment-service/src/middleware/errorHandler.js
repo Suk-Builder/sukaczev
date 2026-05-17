@@ -20,7 +20,7 @@ class CommentError extends Error {
 function errorHandler(err, req, res, next) {
   logger.error('Error occurred:', {
     message: err.message,
-    stack: err.stack,
+    stack: process.env.NODE_ENV === 'development' ? err.stack : undefined,
     path: req.path,
     method: req.method,
     requestId: req.id

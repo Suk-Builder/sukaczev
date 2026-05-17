@@ -19,15 +19,17 @@ const {
 const { asyncHandler } = require('../middleware/errorHandler');
 
 /**
+ * GET /api/users
+ * Get all users with pagination.
+ */
+router.get('/', paginationValidation, asyncHandler(userController.listUsers));
+
+/**
  * GET /api/users/me
  * Get current authenticated user's information.
  */
 router.get('/me', authenticate, asyncHandler(authController.me));
 
-/**
- * GET /api/users/search
- * Search for users by username or display name.
- */
 router.get('/search', searchValidation, asyncHandler(userController.searchUsers));
 
 /**
@@ -93,3 +95,4 @@ router.delete(
 );
 
 module.exports = router;
+

@@ -1,7 +1,8 @@
 import { useState, useCallback } from 'react'
 import { Link } from 'react-router-dom'
 import type { VideoSimple } from '@/types'
-import { formatNumber, formatDuration, formatPublishTime } from '@/utils/format'
+import { formatNumber, formatDuration } from '@/utils/format'
+import { formatPublishTime } from '@/utils/time'
 
 interface VideoCardProps {
   video: VideoSimple

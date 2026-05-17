@@ -16,7 +16,7 @@ app.use(helmet({
 }));
 
 app.use(cors({
-  origin: process.env.CORS_ORIGIN || '*',
+  origin: ['https://sukaczev.top', 'https://www.sukaczev.top', 'http://sukaczev.top'],
   credentials: true
 }));
 

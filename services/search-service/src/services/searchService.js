@@ -1,5 +1,6 @@
 const { getEsClient } = require('../config/elasticsearch');
 const { getRedisClient } = require('../config/redis');
+const { searchVideosFallback } = require('../config/db');
 const config = require('../config');
 const logger = require('../utils/logger');
 const { getTokenizer } = require('../utils/tokenizer');
@@ -14,10 +15,21 @@ class SearchService {
 
   /**
    * Full-text search with filtering, sorting, and highlighting
-   * @param {Object} params - Search parameters
-   * @returns {Promise<Object>} - Search results with highlights
+   * Falls back to database search when ES is unavailable
    */
   async search(params) {
+    try {
+      return await this._searchES(params);
+    } catch (error) {
+      logger.warn(`ES search failed, falling back to DB search: ${error.message}`);
+      return this._searchDB(params);
+    }
+  }
+
+  /**
+   * Elasticsearch search
+   */
+  async _searchES(params) {
     const {
       q: query,
       category,
@@ -38,7 +50,6 @@ class SearchService {
     );
     const size = Math.min(parseInt(pageSize, 10), config.search.maxPageSize);
 
-    // Build the search query
     const searchBody = {
       from,
       size,
@@ -54,14 +65,11 @@ class SearchService {
       }),
       sort: this._buildSort(sort),
       highlight: this._buildHighlight(),
-      _source: {
-        excludes: [],
-      },
+      _source: { excludes: [] },
     };
 
-    logger.info(`Search query: "${query}" | sort: ${sort} | page: ${page}`);
+    logger.info(`ES Search query: "${query}" | sort: ${sort} | page: ${page}`);
 
-    // Record search log
     await this._recordSearchLog(query, category, sort);
 
     const response = await this.esClient.search({
@@ -74,7 +82,6 @@ class SearchService {
 
     const results = hits.map((hit) => this._formatSearchResult(hit));
 
-    // Cache popular searches in Redis
     if (query && total > 0) {
       await this._updateSearchFrequency(query);
     }
@@ -87,13 +94,25 @@ class SearchService {
       query: query || '',
       sort,
       took: response.took,
+      source: 'elasticsearch',
     };
   }
 
   /**
-   * Get search suggestions from Redis and generate new ones
-   * @param {string} partial - Partial query text
-   * @returns {Promise<string[]>} - Array of suggestions
+   * Database fallback search
+   */
+  async _searchDB(params) {
+    logger.info(`DB Fallback search: "${params.q}" | sort: ${params.sort || 'relevance'} | page: ${params.page || 1}`);
+    try {
+      return await searchVideosFallback(params);
+    } catch (dbError) {
+      logger.error(`DB fallback search also failed: ${dbError.message}`);
+      throw dbError;
+    }
+  }
+
+  /**
+   * Get search suggestions - with DB fallback
    */
   async getSuggestions(partial) {
     if (!partial || partial.trim().length === 0) {
@@ -103,7 +122,7 @@ class SearchService {
     const normalizedPartial = partial.toLowerCase().trim();
     const redisKey = `suggest:${normalizedPartial}`;
 
-    // Try to get cached suggestions
+    // Try cached suggestions
     try {
       const cached = await this.redis.get(redisKey);
       if (cached) {
@@ -116,14 +135,17 @@ class SearchService {
     // Generate suggestions from tokenizer
     const tokenizerSuggestions = this.tokenizer.generateSuggestions(normalizedPartial);
 
-    // Search Elasticsearch for matching titles
-    const esSuggestions = await this._getSuggestionsFromES(normalizedPartial);
+    let allSuggestions = [...tokenizerSuggestions];
 
-    // Combine and deduplicate
-    const allSuggestions = [
-      ...tokenizerSuggestions,
-      ...esSuggestions,
-    ];
+    // Try ES suggestions, fall back to DB
+    try {
+      const esSuggestions = await this._getSuggestionsFromES(normalizedPartial);
+      allSuggestions = [...allSuggestions, ...esSuggestions];
+    } catch (esError) {
+      logger.debug(`ES suggestions failed, skipping: ${esError.message}`);
+      // ES is down, just use tokenizer suggestions - no DB fallback for suggestions to keep it simple
+    }
+
     const uniqueSuggestions = [...new Set(allSuggestions)].slice(0, config.search.suggestLimit);
 
     // Cache for 5 minutes
@@ -137,8 +159,7 @@ class SearchService {
   }
 
   /**
-   * Get trending searches from Redis sorted set
-   * @returns {Promise<Array<{term: string, score: number}>>} - Trending searches
+   * Get trending searches from Redis
    */
   async getTrending() {
     const redisKey = 'trending:searches';
@@ -147,7 +168,6 @@ class SearchService {
       const trending = await this.redis.zrevrange(redisKey, 0, config.search.trendingLimit - 1, 'WITHSCORES');
 
       if (trending.length === 0) {
-        // Return default trending if none exist
         return this._getDefaultTrending();
       }
 
@@ -167,14 +187,13 @@ class SearchService {
   }
 
   /**
-   * Update trending searches - called periodically
+   * Update trending searches
    */
   async updateTrendingSearches() {
     const redisKey = 'trending:searches';
     const searchLogKey = 'search:frequency';
 
     try {
-      // Get recent search frequencies
       const frequencies = await this.redis.zrevrange(
         searchLogKey,
         0,
@@ -186,7 +205,6 @@ class SearchService {
         return;
       }
 
-n      // Update trending sorted set
       const pipeline = this.redis.pipeline();
       pipeline.del(redisKey);
 
@@ -194,7 +212,6 @@ n      // Update trending sorted set
         pipeline.zadd(redisKey, frequencies[i + 1], frequencies[i]);
       }
 
-      // Set expiry
       pipeline.expire(redisKey, config.search.hotSearchExpireSeconds);
 
       await pipeline.exec();
@@ -211,7 +228,6 @@ n      // Update trending sorted set
     const must = [];
     const filter = [];
 
-    // Full-text search on title, description, and username
     if (query && query.trim()) {
       const trimmedQuery = query.trim();
 
@@ -225,49 +241,33 @@ n      // Update trending sorted set
         },
       });
     } else {
-      // Match all if no query
       must.push({ match_all: {} });
     }
 
-    // Category filter
     if (category) {
-      filter.push({
-        term: { category },
-      });
+      filter.push({ term: { category } });
     }
 
-    // Duration filter
     if (durationMin !== undefined || durationMax !== undefined) {
       const range = {};
       if (durationMin !== undefined) range.gte = parseInt(durationMin, 10);
       if (durationMax !== undefined) range.lte = parseInt(durationMax, 10);
-      filter.push({
-        range: { duration: range },
-      });
+      filter.push({ range: { duration: range } });
     }
 
-    // Upload date filter
     if (uploadDateFrom || uploadDateTo) {
       const range = {};
       if (uploadDateFrom) range.gte = uploadDateFrom;
       if (uploadDateTo) range.lte = uploadDateTo;
-      filter.push({
-        range: { created_at: range },
-      });
+      filter.push({ range: { created_at: range } });
     }
 
-    // Minimum views filter
     if (minViews) {
-      filter.push({
-        range: { views: { gte: parseInt(minViews, 10) } },
-      });
+      filter.push({ range: { views: { gte: parseInt(minViews, 10) } } });
     }
 
-    // Minimum likes filter
     if (minLikes) {
-      filter.push({
-        range: { likes: { gte: parseInt(minLikes, 10) } },
-      });
+      filter.push({ range: { likes: { gte: parseInt(minLikes, 10) } } });
     }
 
     return {
@@ -290,11 +290,7 @@ n      // Update trending sorted set
       case 'likes':
         return [{ likes: { order: 'desc' } }];
       default:
-        // Relevance - default ES scoring with recency boost
-        return [
-          '_score',
-          { created_at: { order: 'desc' } },
-        ];
+        return ['_score', { created_at: { order: 'desc' } }];
     }
   }
 
@@ -360,62 +356,51 @@ n      // Update trending sorted set
    * Get suggestions from Elasticsearch
    */
   async _getSuggestionsFromES(partial) {
-    try {
-      const response = await this.esClient.search({
-        index: this.indexName,
-        body: {
-          size: 0,
-          suggest: {
-            title_suggest: {
-              prefix: partial,
-              completion: {
-                field: 'title_suggest',
-                fuzzy: {
-                  fuzziness: 'AUTO',
-                },
-                size: 10,
-              },
+    const response = await this.esClient.search({
+      index: this.indexName,
+      body: {
+        size: 0,
+        suggest: {
+          title_suggest: {
+            prefix: partial,
+            completion: {
+              field: 'title_suggest',
+              fuzzy: { fuzziness: 'AUTO' },
+              size: 10,
             },
           },
         },
-      });
+      },
+    });
 
-      const suggestions = [];
-      const titleSuggest = response.suggest?.title_suggest?.[0]?.options || [];
+    const suggestions = [];
+    const titleSuggestions = response.suggest?.title_suggest || [];
 
-      titleSuggest.forEach((option) => {
+    for (const sugg of titleSuggestions) {
+      for (const option of sugg.options) {
         suggestions.push(option.text);
-      });
-
-      return suggestions;
-    } catch (error) {
-      logger.error('ES suggestions error:', error.message);
-      return [];
+      }
     }
+
+    return suggestions;
   }
 
   /**
-   * Record search query for analytics
+   * Record search log
    */
   async _recordSearchLog(query, category, sort) {
-    if (!query || query.trim().length === 0) return;
-
     try {
       const logEntry = {
-        query: query.trim().toLowerCase(),
-        category: category || null,
+        query: query || '',
+        category: category || '',
         sort: sort || 'relevance',
         timestamp: new Date().toISOString(),
-        '@timestamp': new Date().toISOString(),
+        source: 'search_api',
       };
 
-      // Index to search log
-      await this.esClient.index({
-        index: config.search.searchLogIndex,
-        body: logEntry,
-      });
+      await this.redis.lpush('search:log:recent', JSON.stringify(logEntry));
+      await this.redis.ltrim('search:log:recent', 0, 9999);
     } catch (error) {
-      // Non-critical, just log the error
       logger.debug('Search log indexing error:', error.message);
     }
   }

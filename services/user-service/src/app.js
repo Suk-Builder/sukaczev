@@ -23,9 +23,9 @@ function createApp() {
   const app = express();
 
   // Security middleware
-  app.use(helmet());
+  app.use(helmet({ contentSecurityPolicy: { directives: { defaultSrc: ["self"], frameAncestors: ["self", "*.bilibili.com"] } }, crossOriginEmbedderPolicy: false }));
   app.use(cors({
-    origin: process.env.CORS_ORIGIN || '*',
+    origin: ['https://sukaczev.top', 'https://www.sukaczev.top', 'http://sukaczev.top', 'http://localhost', 'http://127.0.0.1'],
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],
     credentials: true,

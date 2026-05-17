@@ -82,7 +82,7 @@ async function list(req, res, next) {
     const options = {
       cursor: cursor || null,
       limit: limit ? parseInt(limit, 10) : 20,
-      categoryId: categoryId || null,
+      categoryId: categoryId || req.query.category || null,
       sortBy: sortBy || 'created_at',
       order: order || 'desc',
       status: status || 'published',

@@ -11,6 +11,7 @@ import { SearchPage } from '@/pages/SearchPage'
 import { ProfilePage } from '@/pages/ProfilePage'
 import { LoginPage } from '@/pages/LoginPage'
 import { RegisterPage } from '@/pages/RegisterPage'
+import { UploadPage } from '@/pages/UploadPage'
 import { useAuthStore } from '@/stores/authStore'
 import { useEffect } from 'react'
 
@@ -146,6 +147,16 @@ export default function App() {
           </MainLayout>
         }
       />
+      <Route
+        path="/upload"
+        element={
+          <MainLayout>
+            <ProtectedRoute>
+              <UploadPage />
+            </ProtectedRoute>
+          </MainLayout>
+        }
+      />
 
       {/* Auth routes (no sidebar, redirect if authenticated) */}
       <Route
@@ -174,3 +185,4 @@ export default function App() {
     </Routes>
   )
 }
+

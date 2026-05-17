@@ -408,6 +408,41 @@ async function searchUsers(req, res, next) {
   }
 }
 
+
+/**
+ * List all users with pagination
+ * @async
+ */
+async function listUsers(req, res, next) {
+  try {
+    const limit = Math.min(parseInt(req.query.limit || '20', 10), 100);
+    const offset = (parseInt(req.query.page || '1', 10) - 1) * limit;
+
+    const result = await User.findAll({ limit, offset });
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        users: result.users.map(user => ({
+          id: user.id,
+          username: user.username,
+          avatar: user.avatar,
+          bio: user.bio,
+          createdAt: user.created_at,
+        })),
+        pagination: {
+          total: result.total,
+          limit: result.limit,
+          offset: result.offset,
+          hasMore: result.offset + result.limit < result.total,
+        },
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
 module.exports = {
   getUser,
   updateUser,
@@ -417,4 +452,5 @@ module.exports = {
   unfollow,
   deleteUser,
   searchUsers,
+  listUsers,
 };
